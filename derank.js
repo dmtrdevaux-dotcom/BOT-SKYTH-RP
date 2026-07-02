@@ -51,7 +51,7 @@ module.exports = {
             .setColor(0x27272F)
             .setDescription(
                 `## 🔴 ➖ Membre retiré — Hiérarchie\n` +
-                `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` +
+                `152232845349152232845349152232845349152232845349152232845349\n` +
                 `> 👤 **Membre —** <@${membre.id}>\n` +
                 `> 🎭 **Rôle —** <@&${rôle.id}>\n` +
                 `> 🕒 **Date —** <t:${Math.floor(Date.now() / 1000)}:f>`
