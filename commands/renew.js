@@ -16,6 +16,14 @@ module.exports = {
         const salonARenouveler = interaction.options.getChannel('salon');
         const moderateur = interaction.member;
 
+        // Vérification runtime que l'utilisateur est administrateur
+        if (!moderateur.permissions || !moderateur.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({
+                content: '❌ Seuls les administrateurs peuvent utiliser cette commande.',
+                ephemeral: true,
+            });
+        }
+
         if (!salonARenouveler) {
             return interaction.reply({
                 content: '❌ Impossible de trouver ce salon.',
