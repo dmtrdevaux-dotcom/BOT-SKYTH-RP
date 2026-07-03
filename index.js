@@ -46,6 +46,12 @@ client.once('ready', async () => {
 
             await rest.put(
                 Routes.applicationGuildCommands(client.user.id, guildId),
+                { body: [] },
+            );
+            console.log(`[🧹] Anciennes commandes du serveur supprimées.`);
+
+            await rest.put(
+                Routes.applicationGuildCommands(client.user.id, guildId),
                 { body: commandDefs },
             );
             console.log(`[✅] ${commandDefs.length} commande(s) déployée(s) instantanément sur le serveur.`);
