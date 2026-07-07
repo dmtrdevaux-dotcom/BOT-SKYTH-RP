@@ -13,11 +13,14 @@ if (!token) {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
     ],
 });
 
 client.commands = new Collection();
 const commandDefs = [];
+const PREFIX = '+';
 
 const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -27,62 +30,29 @@ for (const file of commandFiles) {
     if (command.data && command.execute) {
         client.commands.set(command.data.name, command);
         commandDefs.push(command.data.toJSON());
-        console.log(`[✅] Commande chargée : /${command.data.name}`);
+        console.log(`[✅] Commande chargée : ${PREFIX}${command.data.name}`);
     }
 }
 
 client.once('ready', async () => {
     console.log(`[🤖] Connecté en tant que ${client.user.tag}`);
-
-    try {
-        const rest = new REST().setToken(token);
-
-        if (guildId) {
-            await rest.put(
-                Routes.applicationCommands(client.user.id),
-                { body: [] },
-            );
-            console.log(`[🧹] Anciennes commandes globales supprimées.`);
-
-            await rest.put(
-                Routes.applicationGuildCommands(client.user.id, guildId),
-                { body: [] },
-            );
-            console.log(`[🧹] Anciennes commandes du serveur supprimées.`);
-
-            await rest.put(
-                Routes.applicationGuildCommands(client.user.id, guildId),
-                { body: commandDefs },
-            );
-            console.log(`[✅] ${commandDefs.length} commande(s) déployée(s) instantanément sur le serveur.`);
-        } else {
-            await rest.put(
-                Routes.applicationCommands(client.user.id),
-                { body: commandDefs },
-            );
-            console.log(`[✅] ${commandDefs.length} commande(s) déployée(s) globalement (actives sous ~1h).`);
-        }
-    } catch (err) {
-        console.error('[❌] Erreur lors du déploiement des commandes :', err);
-    }
+    console.log(`[⚙️] Préfixe : ${PREFIX}`);
 });
 
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
+client.on('messageCreate', async message => {
+    if (!message.content.startsWith(PREFIX) || message.author.bot) return;
 
-    const command = client.commands.get(interaction.commandName);
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    const commandName = args.shift().toLowerCase();
+
+    const command = client.commands.get(commandName);
     if (!command) return;
 
     try {
-        await command.execute(interaction);
+        await command.execute(message, args);
     } catch (err) {
-        console.error(`[❌] Erreur lors de l'exécution de /${interaction.commandName} :`, err);
-        const message = { content: '❌ Une erreur est survenue lors de l\'exécution de cette commande.', ephemeral: true };
-        if (interaction.replied || interaction.deferred) {
-            await interaction.followUp(message);
-        } else {
-            await interaction.reply(message);
-        }
+        console.error(`[❌] Erreur lors de l'exécution de ${PREFIX}${commandName} :`, err);
+        message.reply('❌ Une erreur est survenue lors de l\'exécution de cette commande.');
     }
 });
 
