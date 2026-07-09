@@ -30,8 +30,15 @@ module.exports = {
             return message.reply('❌ Format de durée invalide. Utilisez: `1h`, `30m`, `1j`, `2s`, etc.');
         }
 
-        if (durationMs > 28 * 24 * 60 * 60 * 1000) {
-            return message.reply('❌ La durée maximale est de 28 jours.');
+        // Vérifier la limite de durée selon les permissions
+        const isAdmin = message.member.permissions.has(PermissionFlagsBits.Administrator);
+        const maxDurationMs = isAdmin 
+            ? 28 * 24 * 60 * 60 * 1000  // Administrateur : 28 jours max
+            : 7 * 24 * 60 * 60 * 1000;  // Modérateur : 7 jours max
+
+        if (durationMs > maxDurationMs) {
+            const maxDays = isAdmin ? '28 jours' : '7 jours';
+            return message.reply(`❌ La durée maximale pour vous est de ${maxDays}.`);
         }
 
         if (membre.id === message.author.id) {
