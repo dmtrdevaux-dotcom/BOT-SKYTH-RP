@@ -1,4 +1,4 @@
-const { Client, Collection, GatewayIntentBits, REST, Routes } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, REST, Routes, ActivityType } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -74,6 +74,26 @@ client.once('ready', async () => {
     } catch (err) {
         console.error('[❌] Erreur lors du déploiement des commandes :', err);
     }
+
+    // Fonction pour actualiser le statut avec le nombre de membres
+    const updatePresence = async () => {
+        try {
+            const guild = client.guilds.cache.get(guildId);
+            if (guild) {
+                const memberCount = guild.memberCount;
+                client.user.setActivity(`👥 ${memberCount} membres`, { type: ActivityType.Watching });
+                console.log(`[✅] Statut actualisé : ${memberCount} membres`);
+            }
+        } catch (err) {
+            console.error('[❌] Erreur lors de la mise à jour du statut :', err);
+        }
+    };
+
+    // Actualisation immédiate
+    await updatePresence();
+
+    // Actualiser toutes les 30 secondes
+    setInterval(updatePresence, 30000);
 });
 
 client.on('interactionCreate', async interaction => {
