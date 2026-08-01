@@ -48,8 +48,13 @@ module.exports = {
 
         const row = new ActionRowBuilder().addComponents(select);
 
-        // Envoyer le panneau (ajout d'un footer pour indiquer qui l'a posté)
-        const message = await interaction.reply({ embeds: [embed.setFooter({ text: `Panneau posté par ${interaction.user.tag}` })], components: [row], fetchReply: true });
+        // Envoyer le panneau (public)
+        const message = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+
+        // Envoyer une confirmation éphémère seulement à l'auteur de la commande
+        try {
+            await interaction.followUp({ content: 'Panneau posté (visible seulement par vous).', ephemeral: true });
+        } catch (e) { /* ignore */ }
 
         // Collector pour le menu de sélection (uniquement sur ce message)
         const collector = message.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: 5 * 60 * 1000 });
