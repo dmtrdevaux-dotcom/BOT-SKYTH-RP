@@ -48,22 +48,21 @@ module.exports = {
 
         const row = new ActionRowBuilder().addComponents(select);
 
-        // Envoyer le panneau
-        const message = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+        // Envoyer le panneau (ajout d'un footer pour indiquer qui l'a posté)
+        const message = await interaction.reply({ embeds: [embed.setFooter({ text: `Panneau posté par ${interaction.user.tag}` })], components: [row], fetchReply: true });
 
         // Collector pour le menu de sélection (uniquement sur ce message)
         const collector = message.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: 5 * 60 * 1000 });
 
-        const originalUserId = interaction.user.id;
+        // NOTE: suppression de la restriction qui limitait l'utilisation du panneau
+        // const originalUserId = interaction.user.id;
 
         // Gestionnaire global pour les submissions de modals créés par ce panneau
         const modalHandler = async (modalInteraction) => {
             if (!modalInteraction.isModalSubmit()) return;
-            // N'intercepter que les modals créés par ce panneau et l'utilisateur d'origine
+            // N'intercepter que les modals créés par ce panneau
             if (!modalInteraction.customId.startsWith('ticket_modal_')) return;
-            if (modalInteraction.user.id !== originalUserId) {
-                return modalInteraction.reply({ content: '❌ Vous ne pouvez pas soumettre ce formulaire.', ephemeral: true });
-            }
+            // Autoriser tous les utilisateurs à soumettre le modal (suppression de la vérification originalUserId)
 
             // Récupérer les valeurs du formulaire selon le modal
             let subject = '';
@@ -151,10 +150,7 @@ module.exports = {
         });
 
         collector.on('collect', async (selectInteraction) => {
-            // Seuls l'utilisateur qui a invoqué la commande peut utiliser le menu
-            if (selectInteraction.user.id !== originalUserId) {
-                return selectInteraction.reply({ content: '❌ Vous ne pouvez pas utiliser ce panneau.', ephemeral: true });
-            }
+            // Autoriser tous les utilisateurs à utiliser le panneau (suppression de la vérification originalUserId)
 
             const choice = selectInteraction.values[0];
 
