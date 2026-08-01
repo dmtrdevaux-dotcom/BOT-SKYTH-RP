@@ -6,7 +6,7 @@ const { sendTicketCreatedEphemeral } = require('./utils/ticket-confirmation');
 const token = process.env.BOT_TOKEN;
 const guildId = process.env.GUILD_ID;
 
-// Configure ticket category IDs via environment variables. Set these to the Discord category IDs you want tickets to be created under.
+// Mapping categories (set via environment variables if desired)
 const TICKET_CATEGORY_IDS = {
     'General Support': process.env.CAT_GENERAL || null,
     'Report Staff': process.env.CAT_REPORT || null,
@@ -14,7 +14,7 @@ const TICKET_CATEGORY_IDS = {
     'Partenariat': process.env.CAT_PARTNER || null
 };
 
-// Roles that should automatically have access and be mentioned when a ticket opens
+// Roles to auto-allow and mention
 const AUTO_ROLE_IDS = [
     '1474652747239264450',
     '1486076852782235819',
@@ -232,7 +232,7 @@ client.on('interactionCreate', async interaction => {
                     console.error('Erreur lecture modal report (global):', e);
                 }
             } else {
-                try { await interaction.followUp({ content: 'Formulaire reçu. Merci.', ephemeral: true }); } catch (e) { /* ignore */ }
+                try { await interaction.followUp({ content: 'Formulaire reçu. Merci.', ephemeral: true }); } catch (e) { console.error('Error replying for unknown modal:', e); }
                 return;
             }
 
@@ -242,7 +242,7 @@ client.on('interactionCreate', async interaction => {
             const channelName = `🟡-${sanitized || ticketId}`;
 
             if (!interaction.guild.members.me.permissions.has('ManageChannels')) {
-                try { await interaction.followUp({ content: '❌ Le bot n\'a pas la permission de créer des salons. Contactez un administrateur.', ephemeral: true }); } catch (e) { /* ignore */ }
+                try { await interaction.followUp({ content: '❌ Le bot n\'a pas la permission de créer des salons. Contactez un administrateur.', ephemeral: true }); } catch (e) { console.error('Error replying no ManageChannels perm:', e); }
                 return;
             }
 
@@ -251,10 +251,94 @@ client.on('interactionCreate', async interaction => {
                 createdChannel = await interaction.guild.channels.create({ name: channelName, type: 0, reason: `Ticket ${ticketId} créé par ${interaction.user.tag}` });
             } catch (err) {
                 console.error('Impossible de créer le salon de ticket (global):', err);
-                try { await interaction.followUp({ content: '❌ Impossible de créer le salon de ticket. Veuillez réessayer plus tard.', ephemeral: true }); } catch (e) { /* ignore */ }
+                try { await interaction.followUp({ content: '❌ Impossible de créer le salon de ticket. Veuillez réessayer plus tard.', ephemeral: true }); } catch (e) { console.error('Error following up after failed channel create:', e); }
                 return;
             }
 
+            // Continue the flow: apply permissions, send embed, buttons, mentions, register ticket, then ephemeral confirmation
+            // APPLY PERMISSIONS
+            try {
+                const overwrites = [];
+
+                // Deny everyone
+                overwrites.push({ id: interaction.guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] });
+
+                // Allow creator
+                overwrites.push({ id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] });
+
+                // Allow admins
+                interaction.guild.roles.cache.filter(r => r.permissions.has(PermissionsBitField.Flags.Administrator)).forEach(r => {
+                    overwrites.push({ id: r.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] });
+                });
+
+                // Allow auto roles
+                const presentAutoRoles = [];
+                AUTO_ROLE_IDS.forEach(id => {
+                    const role = interaction.guild.roles.cache.get(id);
+                    if (role) {
+                        overwrites.push({ id: id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] });
+                        presentAutoRoles.push(role);
+                    }
+                });
+
+                await createdChannel.permissionOverwrites.set(overwrites);
+            } catch (e) {
+                console.error('Erreur en appliquant les permissionOverwrites sur le salon:', e);
+            }
+
+            // SEND OPENING MESSAGE (mentions + embed + buttons)
+            try {
+                const presentAutoRoles = AUTO_ROLE_IDS.map(id => interaction.guild.roles.cache.get(id)).filter(r => !!r);
+                const mentions = presentAutoRoles.length ? presentAutoRoles.map(r => `<@&${r.id}>`).join(' ') : '';
+
+                const channelEmbed = new EmbedBuilder()
+                    .setColor(0xF59E0B)
+                    .addFields(
+                        { name: '📋 Sujet', value: subject || '—', inline: false },
+                        { name: '🏷️ Catégorie', value: category || '—', inline: false },
+                        { name: '📊 Statut', value: 'En attente', inline: false },
+                        { name: '👤 Utilisateur', value: `${interaction.user.tag}\n(${interaction.user.id})`, inline: false },
+                        { name: '📝 Description', value: userMessage && userMessage.length > 0 ? userMessage : '—', inline: false },
+                        { name: '🧾 Assigné à', value: '—', inline: false }
+                    );
+
+                // Try to reuse existing components if provided by a global builder
+                let componentsToSend = [];
+                if (typeof global.buildTicketComponents === 'function') {
+                    try {
+                        componentsToSend = global.buildTicketComponents(ticketId, interaction.user.id);
+                    } catch (e) {
+                        console.error('Erreur lors de la création des components via buildTicketComponents:', e);
+                        componentsToSend = [];
+                    }
+                }
+
+                if (presentAutoRoles.length) await createdChannel.send({ content: presentAutoRoles.map(r => `<@&${r.id}>`).join(' ') });
+                await createdChannel.send({ embeds: [channelEmbed], components: componentsToSend });
+            } catch (e) {
+                console.error('Impossible d\'envoyer le message d\'ouverture dans le salon du ticket:', e);
+            }
+
+            // RECORD TICKET (non-intrusive)
+            try {
+                if (typeof global.saveTicket === 'function') {
+                    try {
+                        global.saveTicket({
+                            id: ticketId,
+                            channelId: createdChannel.id,
+                            creatorId: interaction.user.id,
+                            subject,
+                            category,
+                            message: userMessage,
+                            createdAt: new Date().toISOString()
+                        });
+                    } catch (e) { console.error('Erreur saveTicket:', e); }
+                }
+            } catch (e) {
+                console.error('Erreur lors de l\'enregistrement du ticket (non bloquant):', e);
+            }
+
+            // EPHEMERAL CONFIRMATION
             try {
                 await sendTicketCreatedEphemeral(interaction, {
                     channel: createdChannel,
@@ -266,17 +350,17 @@ client.on('interactionCreate', async interaction => {
                 });
             } catch (err) {
                 console.error('Erreur envoi confirmation ticket (global):', err);
-                try { await interaction.followUp({ content: '✅ Ticket créé mais impossible d\'envoyer la confirmation. Contactez un administrateur.', ephemeral: true }); } catch (e) { /* ignore */ }
+                try { await interaction.followUp({ content: '✅ Ticket créé mais impossible d\'envoyer la confirmation. Contactez un administrateur.', ephemeral: true }); } catch (e) { console.error('Erreur followUp confirmation:', e); }
             }
 
-            return;
+            // continue naturally (no premature return)
         }
     } catch (err) {
         console.error('[❌] Erreur gestionnaire global d\'interactions:', err);
         try {
             if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Erreur interne lors du traitement de l\'interaction.', ephemeral: true });
             else await interaction.followUp({ content: '❌ Erreur interne lors du traitement de l\'interaction.', ephemeral: true });
-        } catch (e) { /* ignore */ }
+        } catch (e) { console.error('Erreur lors de la tentative de reporting de l\'erreur:', e); }
     }
 });
 
