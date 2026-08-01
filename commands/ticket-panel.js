@@ -11,7 +11,7 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setTitle('Créer un ticket')
             .setDescription('Sélectionnez une catégorie pour créer un ticket.')
-            .setColor(0x3B82F6);
+            .setColor(0xF59E0B); // Couleur jaune
 
         // Menu de sélection avec les 4 catégories demandées
         const select = new StringSelectMenuBuilder()
@@ -136,7 +136,8 @@ module.exports = {
                     subject,
                     category,
                     userMessage,
-                    ticketId
+                    ticketId,
+                    creator: modalInteraction.user
                 });
             } catch (err) {
                 console.error("Erreur lors de l'envoi de la confirmation de ticket:", err);
