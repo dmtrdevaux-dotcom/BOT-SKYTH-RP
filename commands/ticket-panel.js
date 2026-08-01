@@ -46,7 +46,7 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setTitle('Créer un ticket')
             .setDescription('Sélectionnez une catégorie pour créer un ticket.')
-            .setColor(0x5DADE2);
+            .setColor(0x3B82F6);
 
         const select = new StringSelectMenuBuilder()
             .setCustomId('ticket_select')
