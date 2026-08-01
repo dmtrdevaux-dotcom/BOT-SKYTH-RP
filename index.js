@@ -1,10 +1,29 @@
-const { Client, Collection, GatewayIntentBits, REST, Routes, ActivityType, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, REST, Routes, ActivityType, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, StringSelectMenuBuilder, PermissionsBitField, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const { sendTicketCreatedEphemeral } = require('./utils/ticket-confirmation');
 
 const token = process.env.BOT_TOKEN;
 const guildId = process.env.GUILD_ID;
+
+// Configure ticket category IDs via environment variables. Set these to the Discord category IDs you want tickets to be created under.
+const TICKET_CATEGORY_IDS = {
+    'General Support': process.env.CAT_GENERAL || null,
+    'Report Staff': process.env.CAT_REPORT || null,
+    'Contester une Sanction': process.env.CAT_CONTESTER || null,
+    'Partenariat': process.env.CAT_PARTNER || null
+};
+
+// Roles that should automatically have access and be mentioned when a ticket opens
+const AUTO_ROLE_IDS = [
+    '1474652747239264450',
+    '1486076852782235819',
+    '1474653441178599558',
+    '1476637026395619429',
+    '1474654587771162656',
+    '1474652438362591326',
+    '1474449182264791204'
+];
 
 if (!token) {
     console.error('[❌] BOT_TOKEN manquant dans les secrets.');
