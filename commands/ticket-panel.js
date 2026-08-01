@@ -1,53 +1,19 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ComponentType, PermissionsBitField } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
-
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const PANELS_FILE = path.join(DATA_DIR, 'ticket-panels.json');
-
-function ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    if (!fs.existsSync(PANELS_FILE)) fs.writeFileSync(PANELS_FILE, JSON.stringify({}), 'utf8');
-}
-
-function loadPanels() {
-    ensureDataDir();
-    try {
-        const raw = fs.readFileSync(PANELS_FILE, 'utf8');
-        return JSON.parse(raw || '{}');
-    } catch (e) {
-        return {};
-    }
-}
-
-function savePanels(data) {
-    ensureDataDir();
-    fs.writeFileSync(PANELS_FILE, JSON.stringify(data, null, 2), 'utf8');
-}
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ComponentType } = require('discord.js');
+const { sendTicketCreatedEphemeral } = require('../utils/ticket-confirmation');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('ticket-panel')
-        .setDescription('Envoie ou met à jour le panneau de tickets dans un salon (ou le salon courant)')
-        .addChannelOption(option => option.setName('channel').setDescription("Salon où envoyer/mettre à jour le panneau").setRequired(false)),
+        .setDescription('Envoie le panneau de tickets'),
 
     async execute(interaction) {
-        // Permissions: require ManageGuild or Administrator
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild) && !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return interaction.reply({ content: '❌ Vous devez avoir la permission Gérer le serveur ou être Administrateur pour utiliser cette commande.', ephemeral: true });
-        }
-
-        const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
-        if (!targetChannel || !targetChannel.isTextBased()) {
-            return interaction.reply({ content: '❌ Salon invalide. Veuillez fournir un salon texte.', ephemeral: true });
-        }
-
-        // Préparer l'embed et le menu (conserver les fonctionnalités existantes)
+        // Embed conforme au modèle
         const embed = new EmbedBuilder()
             .setTitle('Créer un ticket')
             .setDescription('Sélectionnez une catégorie pour créer un ticket.')
             .setColor(0x3B82F6);
 
+        // Menu de sélection avec les 4 catégories demandées
         const select = new StringSelectMenuBuilder()
             .setCustomId('ticket_select')
             .setPlaceholder('Sélectionnez une catégorie')
@@ -82,126 +48,167 @@ module.exports = {
 
         const row = new ActionRowBuilder().addComponents(select);
 
-        // Charger les panneaux existants
-        const panels = loadPanels();
-        const guildId = interaction.guildId;
-        if (!panels[guildId]) panels[guildId] = {};
+        // Envoyer le panneau
+        const message = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
 
-        // Un guild peut avoir plusieurs panels dans différents salons: indexé par channelId
-        const channelId = targetChannel.id;
-        const existing = panels[guildId][channelId];
+        // Collector pour le menu de sélection (uniquement sur ce message)
+        const collector = message.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: 5 * 60 * 1000 });
 
-        let sentMessage = null;
-        try {
-            if (existing && existing.messageId) {
-                // Tenter de modifier le message existant
-                try {
-                    const msg = await targetChannel.messages.fetch(existing.messageId);
-                    await msg.edit({ embeds: [embed], components: [row] });
-                    sentMessage = msg;
-                } catch (err) {
-                    // Si échec (message supprimé), envoyer un nouveau message
-                    const newMsg = await targetChannel.send({ embeds: [embed], components: [row] });
-                    sentMessage = newMsg;
-                    panels[guildId][channelId] = { messageId: newMsg.id, config: { embed: 'default', options: 'default' }, updatedAt: new Date().toISOString() };
-                    savePanels(panels);
-                }
-            } else {
-                // Envoyer le panneau pour la première fois
-                const newMsg = await targetChannel.send({ embeds: [embed], components: [row] });
-                sentMessage = newMsg;
-                panels[guildId][channelId] = { messageId: newMsg.id, config: { embed: 'default', options: 'default' }, updatedAt: new Date().toISOString() };
-                savePanels(panels);
+        const originalUserId = interaction.user.id;
+
+        // Gestionnaire global pour les submissions de modals créés par ce panneau
+        const modalHandler = async (modalInteraction) => {
+            if (!modalInteraction.isModalSubmit()) return;
+            // N'intercepter que les modals créés par ce panneau et l'utilisateur d'origine
+            if (!modalInteraction.customId.startsWith('ticket_modal_')) return;
+            if (modalInteraction.user.id !== originalUserId) {
+                return modalInteraction.reply({ content: '❌ Vous ne pouvez pas soumettre ce formulaire.', ephemeral: true });
             }
 
-            await interaction.reply({ content: `✅ Panneau de tickets envoyé/mis à jour dans ${targetChannel}.`, ephemeral: true });
-        } catch (e) {
-            console.error('Erreur en envoyant/modifiant le panneau:', e);
-            return interaction.reply({ content: '❌ Une erreur est survenue lors de l\'envoi du panneau.', ephemeral: true });
-        }
+            // Récupérer les valeurs du formulaire selon le modal
+            let subject = '';
+            let userMessage = '';
+            let category = '';
 
-        // Installer un handler global unique sur le client pour gérer les interactions du panneau
-        const client = interaction.client;
-        if (!client._ticketPanelHandlerRegistered) {
-            const handler = async (i) => {
+            if (modalInteraction.customId === 'ticket_modal_general') {
                 try {
-                    // SELECT MENU
-                    if (i.isStringSelectMenu() && i.customId === 'ticket_select') {
-                        const guildPanels = loadPanels()[i.guildId] || {};
-                        const panelEntry = Object.values(guildPanels).find(p => p.messageId === i.message.id);
-                        if (!panelEntry) return; // Pas notre panneau
-
-                        // Autoriser n'importe quel utilisateur à utiliser le panneau (comportement proche de DraftBot)
-                        const choice = i.values[0];
-
-                        if (choice === 'general_support') {
-                            const modal = new ModalBuilder()
-                                .setCustomId('ticket_modal_general')
-                                .setTitle('General Support');
-
-                            const raisonInput = new TextInputBuilder()
-                                .setCustomId('raison')
-                                .setLabel('Raison de la demande')
-                                .setStyle(TextInputStyle.Paragraph)
-                                .setPlaceholder('Répondez à la question : Raison de la demande')
-                                .setRequired(true)
-                                .setMaxLength(1000);
-
-                            const row1 = new ActionRowBuilder().addComponents(raisonInput);
-                            modal.addComponents(row1);
-
-                            await i.showModal(modal);
-                        } else if (choice === 'report_staff') {
-                            const modal = new ModalBuilder()
-                                .setCustomId('ticket_modal_report')
-                                .setTitle('Report Staff');
-
-                            const staffName = new TextInputBuilder()
-                                .setCustomId('staff_name')
-                                .setLabel('Nom du Staff')
-                                .setStyle(TextInputStyle.Short)
-                                .setPlaceholder('Répondez à la question : Nom du Staff')
-                                .setRequired(true)
-                                .setMaxLength(100);
-
-                            const descriptionInput = new TextInputBuilder()
-                                .setCustomId('description')
-                                .setLabel('Description de la demande')
-                                .setStyle(TextInputStyle.Paragraph)
-                                .setPlaceholder('Répondez à la question : Description de la demande')
-                                .setRequired(true)
-                                .setMaxLength(1000);
-
-                            const r1 = new ActionRowBuilder().addComponents(staffName);
-                            const r2 = new ActionRowBuilder().addComponents(descriptionInput);
-                            modal.addComponents(r1, r2);
-
-                            await i.showModal(modal);
-                        } else if (choice === 'contester_sanction' || choice === 'partenariat') {
-                            await i.reply({ content: 'Option sauvegardée. Cette catégorie n\'est pas encore implémentée.', ephemeral: true });
-                        } else {
-                            await i.reply({ content: 'Catégorie inconnue.', ephemeral: true });
-                        }
-
-                        return;
-                    }
-
-                    // MODAL SUBMISSION
-                    if (i.isModalSubmit() && i.customId && i.customId.startsWith('ticket_modal_')) {
-                        // Autoriser n'importe quel utilisateur à soumettre le formulaire (le modal appartient à l'utilisateur qui l'a ouvert)
-                        await i.reply({ content: '✅ Formulaire soumis. Merci.', ephemeral: true });
-                        return;
-                    }
-                } catch (err) {
-                    console.error('Erreur dans le handler global ticket-panel:', err);
+                    const raison = modalInteraction.fields.getTextInputValue('raison');
+                    subject = raison || 'Sujet';
+                    userMessage = raison || '';
+                    category = 'General Support';
+                } catch (e) {
+                    console.error('Erreur lors de la lecture des champs du modal general:', e);
                 }
-            };
+            } else if (modalInteraction.customId === 'ticket_modal_report') {
+                try {
+                    const staffName = modalInteraction.fields.getTextInputValue('staff_name');
+                    const description = modalInteraction.fields.getTextInputValue('description');
+                    subject = staffName || 'Report';
+                    userMessage = description || '';
+                    category = 'Report Staff';
+                } catch (e) {
+                    console.error('Erreur lors de la lecture des champs du modal report:', e);
+                }
+            } else {
+                // Modal non géré : accusé de réception neutre
+                try {
+                    await modalInteraction.reply({ content: 'Formulaire reçu. Merci.', ephemeral: true });
+                } catch (e) { /* ignore */ }
+                return;
+            }
 
-            client.on('interactionCreate', handler);
-            client._ticketPanelHandlerRegistered = true;
-            client._ticketPanelHandlerRef = handler;
-        }
+            // Générer un identifiant de ticket simple
+            const ticketId = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // Note: on ne supprime plus le listener après un timeout — le panneau est persistant et géré globalement.
+            // Préparer le nom du salon : emoji + pseudo (sanitized)
+            const username = modalInteraction.user.username || 'user';
+            const sanitized = username.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+            const channelName = `🟡-${sanitized || ticketId}`;
+
+            // Vérifier les permissions du bot pour créer un channel
+            if (!modalInteraction.guild.members.me.permissions.has('ManageChannels')) {
+                try {
+                    await modalInteraction.reply({ content: '❌ Le bot n\'a pas la permission de créer des salons. Contactez un administrateur.', ephemeral: true });
+                } catch (e) { /* ignore */ }
+                return;
+            }
+
+            // Tenter de créer le salon du ticket
+            let createdChannel = null;
+            try {
+                createdChannel = await modalInteraction.guild.channels.create({ name: channelName, type: 0, reason: `Ticket ${ticketId} créé par ${modalInteraction.user.tag}` });
+            } catch (err) {
+                console.error('Impossible de créer le salon de ticket:', err);
+                try {
+                    await modalInteraction.reply({ content: '❌ Impossible de créer le salon de ticket. Veuillez réessayer plus tard.', ephemeral: true });
+                } catch (e) { /* ignore */ }
+                return;
+            }
+
+            // Si création réussie, envoyer l'embed éphémère de confirmation (utilitaire)
+            try {
+                await sendTicketCreatedEphemeral(modalInteraction, {
+                    channel: createdChannel,
+                    subject,
+                    category,
+                    userMessage,
+                    ticketId
+                });
+            } catch (err) {
+                console.error("Erreur lors de l'envoi de la confirmation de ticket:", err);
+                try {
+                    await modalInteraction.reply({ content: '✅ Ticket créé mais impossible d\'envoyer la confirmation. Contactez un administrateur.', ephemeral: true });
+                } catch (e) { /* ignore */ }
+            }
+        };
+
+        // Ajouter l'écouteur global
+        interaction.client.on('interactionCreate', modalHandler);
+
+        // Nettoyage : enlever le listener à la fin du collector
+        collector.on('end', () => {
+            try { interaction.client.removeListener('interactionCreate', modalHandler); } catch (e) { /* ignore */ }
+        });
+
+        collector.on('collect', async (selectInteraction) => {
+            // Seuls l'utilisateur qui a invoqué la commande peut utiliser le menu
+            if (selectInteraction.user.id !== originalUserId) {
+                return selectInteraction.reply({ content: '❌ Vous ne pouvez pas utiliser ce panneau.', ephemeral: true });
+            }
+
+            const choice = selectInteraction.values[0];
+
+            if (choice === 'general_support') {
+                // Modal pour General Support
+                const modal = new ModalBuilder()
+                    .setCustomId('ticket_modal_general')
+                    .setTitle('General Support');
+
+                const raisonInput = new TextInputBuilder()
+                    .setCustomId('raison')
+                    .setLabel('Raison de la demande')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder('Répondez à la question : Raison de la demande')
+                    .setRequired(true)
+                    .setMaxLength(1000);
+
+                const row1 = new ActionRowBuilder().addComponents(raisonInput);
+                modal.addComponents(row1);
+
+                await selectInteraction.showModal(modal);
+            } else if (choice === 'report_staff') {
+                // Modal pour Report Staff avec deux questions
+                const modal = new ModalBuilder()
+                    .setCustomId('ticket_modal_report')
+                    .setTitle('Report Staff');
+
+                const staffName = new TextInputBuilder()
+                    .setCustomId('staff_name')
+                    .setLabel('Nom du Staff')
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder('Répondez à la question : Nom du Staff')
+                    .setRequired(true)
+                    .setMaxLength(100);
+
+                const descriptionInput = new TextInputBuilder()
+                    .setCustomId('description')
+                    .setLabel('Description de la demande')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder('Répondez à la question : Description de la demande')
+                    .setRequired(true)
+                    .setMaxLength(1000);
+
+                const r1 = new ActionRowBuilder().addComponents(staffName);
+                const r2 = new ActionRowBuilder().addComponents(descriptionInput);
+                modal.addComponents(r1, r2);
+
+                await selectInteraction.showModal(modal);
+            } else if (choice === 'contester_sanction' || choice === 'partenariat') {
+                // Pour l'instant, ne rien faire.
+                await selectInteraction.reply({ content: 'Option sauvegardée. Cette catégorie n\'est pas encore implémentée.', ephemeral: true });
+            } else {
+                await selectInteraction.reply({ content: 'Catégorie inconnue.', ephemeral: true });
+            }
+        });
     }
 };
