@@ -141,136 +141,137 @@ client.on('interactionCreate', async interaction => {
 client.on('interactionCreate', async interaction => {
     try {
         // Handle the ticket select menu posted by both /ticket-panel and /ticket-panel-send
-        if (interaction.isStringSelectMenu && typeof interaction.isStringSelectMenu === 'function' ? interaction.isStringSelectMenu() : interaction.isSelectMenu && interaction.isSelectMenu()) {
-            if (interaction.customId === 'ticket_select') {
-                const choice = interaction.values[0];
+-        if (interaction.isStringSelectMenu && typeof interaction.isStringSelectMenu === 'function' ? interaction.isStringSelectMenu() : interaction.isSelectMenu && interaction.isSelectMenu()) {
++        if (typeof interaction.isStringSelectMenu === 'function' && interaction.isStringSelectMenu()) {
+             if (interaction.customId === 'ticket_select') {
+                 const choice = interaction.values[0];
 
-                if (choice === 'general_support') {
-                    const modal = new ModalBuilder()
-                        .setCustomId('ticket_modal_general')
-                        .setTitle('General Support');
+                 if (choice === 'general_support') {
+                     const modal = new ModalBuilder()
+                         .setCustomId('ticket_modal_general')
+                         .setTitle('General Support');
 
-                    const raisonInput = new TextInputBuilder()
-                        .setCustomId('raison')
-                        .setLabel('Raison de la demande')
-                        .setStyle(TextInputStyle.Paragraph)
-                        .setPlaceholder('Répondez à la question : Raison de la demande')
-                        .setRequired(true)
-                        .setMaxLength(1000);
+                     const raisonInput = new TextInputBuilder()
+                         .setCustomId('raison')
+                         .setLabel('Raison de la demande')
+                         .setStyle(TextInputStyle.Paragraph)
+                         .setPlaceholder('Répondez à la question : Raison de la demande')
+                         .setRequired(true)
+                         .setMaxLength(1000);
 
-                    const row1 = new ActionRowBuilder().addComponents(raisonInput);
-                    modal.addComponents(row1);
+                     const row1 = new ActionRowBuilder().addComponents(raisonInput);
+                     modal.addComponents(row1);
 
-                    await interaction.showModal(modal);
-                    return;
-                } else if (choice === 'report_staff') {
-                    const modal = new ModalBuilder()
-                        .setCustomId('ticket_modal_report')
-                        .setTitle('Report Staff');
+                     await interaction.showModal(modal);
+                     return;
+                 } else if (choice === 'report_staff') {
+                     const modal = new ModalBuilder()
+                         .setCustomId('ticket_modal_report')
+                         .setTitle('Report Staff');
 
-                    const staffName = new TextInputBuilder()
-                        .setCustomId('staff_name')
-                        .setLabel('Nom du Staff')
-                        .setStyle(TextInputStyle.Short)
-                        .setPlaceholder('Répondez à la question : Nom du Staff')
-                        .setRequired(true)
-                        .setMaxLength(100);
+                     const staffName = new TextInputBuilder()
+                         .setCustomId('staff_name')
+                         .setLabel('Nom du Staff')
+                         .setStyle(TextInputStyle.Short)
+                         .setPlaceholder('Répondez à la question : Nom du Staff')
+                         .setRequired(true)
+                         .setMaxLength(100);
 
-                    const descriptionInput = new TextInputBuilder()
-                        .setCustomId('description')
-                        .setLabel('Description de la demande')
-                        .setStyle(TextInputStyle.Paragraph)
-                        .setPlaceholder('Répondez à la question : Description de la demande')
-                        .setRequired(true)
-                        .setMaxLength(1000);
+                     const descriptionInput = new TextInputBuilder()
+                         .setCustomId('description')
+                         .setLabel('Description de la demande')
+                         .setStyle(TextInputStyle.Paragraph)
+                         .setPlaceholder('Répondez à la question : Description de la demande')
+                         .setRequired(true)
+                         .setMaxLength(1000);
 
-                    const r1 = new ActionRowBuilder().addComponents(staffName);
-                    const r2 = new ActionRowBuilder().addComponents(descriptionInput);
-                    modal.addComponents(r1, r2);
+                     const r1 = new ActionRowBuilder().addComponents(staffName);
+                     const r2 = new ActionRowBuilder().addComponents(descriptionInput);
+                     modal.addComponents(r1, r2);
 
-                    await interaction.showModal(modal);
-                    return;
-                } else if (choice === 'contester_sanction' || choice === 'partenariat') {
-                    await interaction.reply({ content: 'Option sauvegardée. Cette catégorie n\'est pas encore implémentée.', ephemeral: true });
-                    return;
-                } else {
-                    await interaction.reply({ content: 'Catégorie inconnue.', ephemeral: true });
-                    return;
-                }
-            }
-        }
+                     await interaction.showModal(modal);
+                     return;
+                 } else if (choice === 'contester_sanction' || choice === 'partenariat') {
+                     await interaction.reply({ content: 'Option sauvegardée. Cette catégorie n\'est pas encore implémentée.', ephemeral: true });
+                     return;
+                 } else {
+                     await interaction.reply({ content: 'Catégorie inconnue.', ephemeral: true });
+                     return;
+                 }
+             }
+         }
 
-        // Handle modal submissions for ticket creation
-        if (interaction.isModalSubmit && typeof interaction.isModalSubmit === 'function' ? interaction.isModalSubmit() : false) {
-            if (!interaction.customId.startsWith('ticket_modal_')) return;
+         // Handle modal submissions for ticket creation
+         if (interaction.isModalSubmit && typeof interaction.isModalSubmit === 'function' ? interaction.isModalSubmit() : false) {
+             if (!interaction.customId.startsWith('ticket_modal_')) return;
 
-            // Defer reply to avoid "Interaction failed" while we create channels
-            try {
-                if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true });
-            } catch (e) { console.error('Erreur lors du defer du modal submit global:', e); }
+             // Defer reply to avoid "Interaction failed" while we create channels
+             try {
+                 if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true });
+             } catch (e) { console.error('Erreur lors du defer du modal submit global:', e); }
 
-            let subject = '';
-            let userMessage = '';
-            let category = '';
+             let subject = '';
+             let userMessage = '';
+             let category = '';
 
-            if (interaction.customId === 'ticket_modal_general') {
-                try {
-                    const raison = interaction.fields.getTextInputValue('raison');
-                    subject = raison || 'Sujet';
-                    userMessage = raison || '';
-                    category = 'General Support';
-                } catch (e) {
-                    console.error('Erreur lecture modal general (global):', e);
-                }
-            } else if (interaction.customId === 'ticket_modal_report') {
-                try {
-                    const staffName = interaction.fields.getTextInputValue('staff_name');
-                    const description = interaction.fields.getTextInputValue('description');
-                    subject = staffName || 'Report';
-                    userMessage = description || '';
-                    category = 'Report Staff';
-                } catch (e) {
-                    console.error('Erreur lecture modal report (global):', e);
-                }
-            } else {
-                try { await interaction.followUp({ content: 'Formulaire reçu. Merci.', ephemeral: true }); } catch (e) { console.error('Error replying for unknown modal:', e); }
-                return;
-            }
+             if (interaction.customId === 'ticket_modal_general') {
+                 try {
+                     const raison = interaction.fields.getTextInputValue('raison');
+                     subject = raison || 'Sujet';
+                     userMessage = raison || '';
+                     category = 'General Support';
+                 } catch (e) {
+                     console.error('Erreur lecture modal general (global):', e);
+                 }
+             } else if (interaction.customId === 'ticket_modal_report') {
+                 try {
+                     const staffName = interaction.fields.getTextInputValue('staff_name');
+                     const description = interaction.fields.getTextInputValue('description');
+                     subject = staffName || 'Report';
+                     userMessage = description || '';
+                     category = 'Report Staff';
+                 } catch (e) {
+                     console.error('Erreur lecture modal report (global):', e);
+                 }
+             } else {
+                 try { await interaction.followUp({ content: 'Formulaire reçu. Merci.', ephemeral: true }); } catch (e) { console.error('Error replying for unknown modal:', e); }
+                 return;
+             }
 
-            const ticketId = Math.floor(100000 + Math.random() * 900000).toString();
+             const ticketId = Math.floor(100000 + Math.random() * 900000).toString();
 
-            // Delegate ticket creation to the shared creator (ensures single source of truth)
-            try {
-                const createdChannel = await ticketCreator.createTicket({
-                    guild: interaction.guild,
-                    interaction,
-                    subject,
-                    userMessage,
-                    category,
-                    ticketId,
-                    TICKET_CATEGORY_IDS,
-                    AUTO_ROLE_IDS
-                });
+             // Delegate ticket creation to the shared creator (ensures single source of truth)
+             try {
+                 const createdChannel = await ticketCreator.createTicket({
+                     guild: interaction.guild,
+                     interaction,
+                     subject,
+                     userMessage,
+                     category,
+                     ticketId,
+                     TICKET_CATEGORY_IDS,
+                     AUTO_ROLE_IDS
+                 });
 
-                // createdChannel should be a GuildChannel; ticketCreator handles permissions, embed, components, and ephemeral confirmation
-                if (!createdChannel) {
-                    console.warn('ticketCreator returned falsy createdChannel');
-                    try { await interaction.followUp({ content: '❌ Erreur interne lors de la création du ticket.', ephemeral: true }); } catch (e) { console.error('Error following up after null createdChannel:', e); }
-                }
-            } catch (e) {
-                console.error('Erreur lors de la création du ticket via ticketCreator:', e);
-                try { await interaction.followUp({ content: '❌ Impossible de créer le ticket. Contactez un administrateur.', ephemeral: true }); } catch (er) { console.error('Error followUp after ticketCreator failure:', er); }
-            }
+                 // createdChannel should be a GuildChannel; ticketCreator handles permissions, embed, components, and ephemeral confirmation
+                 if (!createdChannel) {
+                     console.warn('ticketCreator returned falsy createdChannel');
+                     try { await interaction.followUp({ content: '❌ Erreur interne lors de la création du ticket.', ephemeral: true }); } catch (e) { console.error('Error following up after nul[...]'); }
+                 }
+             } catch (e) {
+                 console.error('Erreur lors de la création du ticket via ticketCreator:', e);
+                 try { await interaction.followUp({ content: '❌ Impossible de créer le ticket. Contactez un administrateur.', ephemeral: true }); } catch (er) { console.error('Error followUp af[...]'); }
+             }
 
-            return;
-        }
-    } catch (err) {
-        console.error('[❌] Erreur gestionnaire global d\'interactions:', err);
-        try {
-            if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Erreur interne lors du traitement de l\'interaction.', ephemeral: true });
-            else await interaction.followUp({ content: '❌ Erreur interne lors du traitement de l\'interaction.', ephemeral: true });
-        } catch (e) { console.error('Erreur lors de la tentative de reporting de l\'erreur:', e); }
-    }
+             return;
+         }
+     } catch (err) {
+         console.error('[❌] Erreur gestionnaire global d\'interactions:', err);
+         try {
+             if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Erreur interne lors du traitement de l\'interaction.', ephemeral: true });
+             else await interaction.followUp({ content: '❌ Erreur interne lors du traitement de l\'interaction.', ephemeral: true });
+         } catch (e) { console.error('Erreur lors de la tentative de reporting de l\'erreur:', e); }
+     }
 });
 
 client.on('messageCreate', async message => {
