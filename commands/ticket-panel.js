@@ -67,6 +67,18 @@ module.exports = {
             if (!modalInteraction.isModalSubmit()) return;
             // N'intercepter que les modals créés par ce panneau
             if (!modalInteraction.customId.startsWith('ticket_modal_')) return;
+
+            // IMPORTANT: defer the modal interaction immediately to avoid the "Interaction failed" Discord banner
+            // Some operations (création de salon, I/O) can take more than 3s; deferring gives us more time.
+            try {
+                if (!modalInteraction.deferred && !modalInteraction.replied) {
+                    await modalInteraction.deferReply({ ephemeral: true });
+                }
+            } catch (e) {
+                console.error('Erreur lors du defer du modalInteraction:', e);
+                // continue anyway; we'll try to followUp later
+            }
+
             // Autoriser tous les utilisateurs à soumettre le modal (suppression de la vérification originalUserId)
 
             // Récupérer les valeurs du formulaire selon le modal
@@ -96,7 +108,7 @@ module.exports = {
             } else {
                 // Modal non géré : accusé de réception neutre
                 try {
-                    await modalInteraction.reply({ content: 'Formulaire reçu. Merci.', ephemeral: true });
+                    await modalInteraction.followUp({ content: 'Formulaire reçu. Merci.', ephemeral: true });
                 } catch (e) { /* ignore */ }
                 return;
             }
@@ -112,7 +124,7 @@ module.exports = {
             // Vérifier les permissions du bot pour créer un channel
             if (!modalInteraction.guild.members.me.permissions.has('ManageChannels')) {
                 try {
-                    await modalInteraction.reply({ content: '❌ Le bot n\'a pas la permission de créer des salons. Contactez un administrateur.', ephemeral: true });
+                    await modalInteraction.followUp({ content: '❌ Le bot n\'a pas la permission de créer des salons. Contactez un administrateur.', ephemeral: true });
                 } catch (e) { /* ignore */ }
                 return;
             }
@@ -124,7 +136,7 @@ module.exports = {
             } catch (err) {
                 console.error('Impossible de créer le salon de ticket:', err);
                 try {
-                    await modalInteraction.reply({ content: '❌ Impossible de créer le salon de ticket. Veuillez réessayer plus tard.', ephemeral: true });
+                    await modalInteraction.followUp({ content: '❌ Impossible de créer le salon de ticket. Veuillez réessayer plus tard.', ephemeral: true });
                 } catch (e) { /* ignore */ }
                 return;
             }
@@ -142,7 +154,7 @@ module.exports = {
             } catch (err) {
                 console.error("Erreur lors de l'envoi de la confirmation de ticket:", err);
                 try {
-                    await modalInteraction.reply({ content: '✅ Ticket créé mais impossible d\'envoyer la confirmation. Contactez un administrateur.', ephemeral: true });
+                    await modalInteraction.followUp({ content: '✅ Ticket créé mais impossible d\'envoyer la confirmation. Contactez un administrateur.', ephemeral: true });
                 } catch (e) { /* ignore */ }
             }
         };
