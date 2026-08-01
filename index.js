@@ -2,6 +2,7 @@ const { Client, Collection, GatewayIntentBits, REST, Routes, ActivityType, Modal
 const fs = require('fs');
 const path = require('path');
 const { sendTicketCreatedEphemeral } = require('./utils/ticket-confirmation');
+const ticketCreator = require('./utils/ticket-creator');
 
 const token = process.env.BOT_TOKEN;
 const guildId = process.env.GUILD_ID;
@@ -237,123 +238,31 @@ client.on('interactionCreate', async interaction => {
             }
 
             const ticketId = Math.floor(100000 + Math.random() * 900000).toString();
-            const username = interaction.user.username || 'user';
-            const sanitized = username.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
-            const channelName = `🟡-${sanitized || ticketId}`;
 
-            if (!interaction.guild.members.me.permissions.has('ManageChannels')) {
-                try { await interaction.followUp({ content: '❌ Le bot n\'a pas la permission de créer des salons. Contactez un administrateur.', ephemeral: true }); } catch (e) { console.error('Error replying no ManageChannels perm:', e); }
-                return;
-            }
-
-            let createdChannel = null;
+            // Delegate ticket creation to the shared creator (ensures single source of truth)
             try {
-                createdChannel = await interaction.guild.channels.create({ name: channelName, type: 0, reason: `Ticket ${ticketId} créé par ${interaction.user.tag}` });
-            } catch (err) {
-                console.error('Impossible de créer le salon de ticket (global):', err);
-                try { await interaction.followUp({ content: '❌ Impossible de créer le salon de ticket. Veuillez réessayer plus tard.', ephemeral: true }); } catch (e) { console.error('Error following up after failed channel create:', e); }
-                return;
-            }
-
-            // Continue the flow: apply permissions, send embed, buttons, mentions, register ticket, then ephemeral confirmation
-            // APPLY PERMISSIONS
-            try {
-                const overwrites = [];
-
-                // Deny everyone
-                overwrites.push({ id: interaction.guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] });
-
-                // Allow creator
-                overwrites.push({ id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] });
-
-                // Allow admins
-                interaction.guild.roles.cache.filter(r => r.permissions.has(PermissionsBitField.Flags.Administrator)).forEach(r => {
-                    overwrites.push({ id: r.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] });
-                });
-
-                // Allow auto roles
-                const presentAutoRoles = [];
-                AUTO_ROLE_IDS.forEach(id => {
-                    const role = interaction.guild.roles.cache.get(id);
-                    if (role) {
-                        overwrites.push({ id: id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] });
-                        presentAutoRoles.push(role);
-                    }
-                });
-
-                await createdChannel.permissionOverwrites.set(overwrites);
-            } catch (e) {
-                console.error('Erreur en appliquant les permissionOverwrites sur le salon:', e);
-            }
-
-            // SEND OPENING MESSAGE (mentions + embed + buttons)
-            try {
-                const presentAutoRoles = AUTO_ROLE_IDS.map(id => interaction.guild.roles.cache.get(id)).filter(r => !!r);
-                const mentions = presentAutoRoles.length ? presentAutoRoles.map(r => `<@&${r.id}>`).join(' ') : '';
-
-                const channelEmbed = new EmbedBuilder()
-                    .setColor(0xF59E0B)
-                    .addFields(
-                        { name: '📋 Sujet', value: subject || '—', inline: false },
-                        { name: '🏷️ Catégorie', value: category || '—', inline: false },
-                        { name: '📊 Statut', value: 'En attente', inline: false },
-                        { name: '👤 Utilisateur', value: `${interaction.user.tag}\n(${interaction.user.id})`, inline: false },
-                        { name: '📝 Description', value: userMessage && userMessage.length > 0 ? userMessage : '—', inline: false },
-                        { name: '🧾 Assigné à', value: '—', inline: false }
-                    );
-
-                // Try to reuse existing components if provided by a global builder
-                let componentsToSend = [];
-                if (typeof global.buildTicketComponents === 'function') {
-                    try {
-                        componentsToSend = global.buildTicketComponents(ticketId, interaction.user.id);
-                    } catch (e) {
-                        console.error('Erreur lors de la création des components via buildTicketComponents:', e);
-                        componentsToSend = [];
-                    }
-                }
-
-                if (presentAutoRoles.length) await createdChannel.send({ content: presentAutoRoles.map(r => `<@&${r.id}>`).join(' ') });
-                await createdChannel.send({ embeds: [channelEmbed], components: componentsToSend });
-            } catch (e) {
-                console.error('Impossible d\'envoyer le message d\'ouverture dans le salon du ticket:', e);
-            }
-
-            // RECORD TICKET (non-intrusive)
-            try {
-                if (typeof global.saveTicket === 'function') {
-                    try {
-                        global.saveTicket({
-                            id: ticketId,
-                            channelId: createdChannel.id,
-                            creatorId: interaction.user.id,
-                            subject,
-                            category,
-                            message: userMessage,
-                            createdAt: new Date().toISOString()
-                        });
-                    } catch (e) { console.error('Erreur saveTicket:', e); }
-                }
-            } catch (e) {
-                console.error('Erreur lors de l\'enregistrement du ticket (non bloquant):', e);
-            }
-
-            // EPHEMERAL CONFIRMATION
-            try {
-                await sendTicketCreatedEphemeral(interaction, {
-                    channel: createdChannel,
+                const createdChannel = await ticketCreator.createTicket({
+                    guild: interaction.guild,
+                    interaction,
                     subject,
-                    category,
                     userMessage,
+                    category,
                     ticketId,
-                    creator: interaction.user
+                    TICKET_CATEGORY_IDS,
+                    AUTO_ROLE_IDS
                 });
-            } catch (err) {
-                console.error('Erreur envoi confirmation ticket (global):', err);
-                try { await interaction.followUp({ content: '✅ Ticket créé mais impossible d\'envoyer la confirmation. Contactez un administrateur.', ephemeral: true }); } catch (e) { console.error('Erreur followUp confirmation:', e); }
+
+                // createdChannel should be a GuildChannel; ticketCreator handles permissions, embed, components, and ephemeral confirmation
+                if (!createdChannel) {
+                    console.warn('ticketCreator returned falsy createdChannel');
+                    try { await interaction.followUp({ content: '❌ Erreur interne lors de la création du ticket.', ephemeral: true }); } catch (e) { console.error('Error following up after null createdChannel:', e); }
+                }
+            } catch (e) {
+                console.error('Erreur lors de la création du ticket via ticketCreator:', e);
+                try { await interaction.followUp({ content: '❌ Impossible de créer le ticket. Contactez un administrateur.', ephemeral: true }); } catch (er) { console.error('Error followUp after ticketCreator failure:', er); }
             }
 
-            // continue naturally (no premature return)
+            return;
         }
     } catch (err) {
         console.error('[❌] Erreur gestionnaire global d\'interactions:', err);
